@@ -8,30 +8,30 @@ from sklearn.linear_model import Ridge
 
 import matplotlib.pyplot as plt
 
+# =========================
+# APP TITLE
+# =========================
 st.title("Kenya Sugar AI Dashboard v3 (Advanced Forecasting System)")
 
 # =========================
 # DATA LOADING (CLOUD SAFE)
 # =========================
-
 uploaded_file = st.file_uploader("Upload Full Dataset (CSV)", type=["csv"])
 
 DATA_PATH = "Integrated_Sugar_Forecasting_Data.csv"
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-
 else:
     if os.path.exists(DATA_PATH):
         df = pd.read_csv(DATA_PATH)
     else:
-        st.error("Dataset not found. Please upload a CSV or add it to the repo.")
+        st.error("Dataset not found. Upload CSV or add file to repo.")
         st.stop()
 
 # =========================
 # PREPROCESSING
 # =========================
-
 df["Date"] = pd.to_datetime(df["Date"])
 df = df.sort_values("Date")
 
@@ -41,7 +41,6 @@ st.dataframe(df.head())
 # =========================
 # FEATURE ENGINEERING
 # =========================
-
 df["Month"] = df["Date"].dt.month
 df["Year"] = df["Date"].dt.year
 
@@ -60,7 +59,6 @@ df = df.dropna()
 # =========================
 # TRAIN / TEST SPLIT
 # =========================
-
 train_df = df[df["Date"].dt.year <= 2024]
 test_df = df[df["Date"].dt.year == 2025]
 
@@ -71,7 +69,6 @@ st.write("Test (2025):", len(test_df))
 # =========================
 # FEATURES & TARGETS
 # =========================
-
 features = [
     "Sug_Sales",
     "Sug_Closing_Stock",
@@ -98,16 +95,14 @@ targets = [
 # =========================
 # STORAGE
 # =========================
-
 results = {}
 forecast_results = {}
 
 st.subheader("📊 Model Training & Evaluation")
 
 # =========================
-# MODEL LOOP
+# MODEL TRAINING LOOP
 # =========================
-
 for target in targets:
 
     X_train = train_df[features]
@@ -116,7 +111,6 @@ for target in targets:
     X_test = test_df[features]
     y_test = test_df[target]
 
-    # Models
     rf = RandomForestRegressor(n_estimators=300, random_state=42)
     ridge = Ridge()
 
@@ -126,16 +120,12 @@ for target in targets:
     rf_pred = rf.predict(X_test)
     ridge_pred = ridge.predict(X_test)
 
-    # Ensemble
     ensemble_pred = (rf_pred + ridge_pred) / 2
 
-    # Uncertainty band
     std_dev = np.std([rf_pred, ridge_pred], axis=0)
-
     lower = ensemble_pred - 1.5 * std_dev
     upper = ensemble_pred + 1.5 * std_dev
 
-    # Accuracy
     mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
     accuracy = (1 - mape) * 100
 
@@ -152,17 +142,36 @@ for target in targets:
     }
 
 # =========================
-# RESULTS TABLE
+# MODEL REPORT
 # =========================
+st.subheader("📄 Model Report Summary")
 
-st.subheader("📈 Model Performance Summary")
+st.markdown("""
+### Models Used
+- Random Forest Regressor (300 trees)
+- Ridge Regression
+- Ensemble (Average of both models)
+
+### Methodology
+- Train/Test split: 2020–2024 vs 2025
+- Feature engineering:
+  - Lag features (1–2 months)
+  - Rolling averages (3-month)
+  - Stock pressure ratio
+  - Import dependency ratio
+
+### Evaluation Metric
+- MAPE (Mean Absolute Percentage Error)
+- Accuracy = 1 - MAPE
+""")
+
+st.subheader("📊 Accuracy Breakdown")
 st.dataframe(pd.DataFrame(results).T)
 
 # =========================
-# VISUALIZATION
+# VISUAL + TABLE SECTION
 # =========================
-
-st.subheader("📊 Forecast vs Actual Dashboard (2025)")
+st.subheader("📊 Forecast Dashboard (2025)")
 
 selected_target = st.selectbox("Select Variable", targets)
 
@@ -171,7 +180,7 @@ data = forecast_results[selected_target]
 fig, ax = plt.subplots()
 
 ax.plot(data["actual"], label="Actual", marker="o")
-ax.plot(data["predicted"], label="Forecast (Ensemble)", marker="o")
+ax.plot(data["predicted"], label="Forecast", marker="o")
 
 ax.fill_between(
     range(len(data["actual"])),
@@ -181,7 +190,22 @@ ax.fill_between(
     label="Confidence Range"
 )
 
-ax.set_title(f"{selected_target} Forecast vs Actual (2025)")
 ax.legend()
+ax.set_title(f"{selected_target} Forecast vs Actual (2025)")
 
 st.pyplot(fig)
+
+# =========================
+# MONTHLY FORECAST TABLE
+# =========================
+st.subheader("📅 Monthly Forecast Table")
+
+proj_df = pd.DataFrame({
+    "Month": test_df["Date"].dt.strftime("%Y-%m"),
+    "Actual": data["actual"],
+    "Forecast": data["predicted"],
+    "Lower Bound": data["lower"],
+    "Upper Bound": data["upper"]
+})
+
+st.dataframe(proj_df)
