@@ -4,7 +4,8 @@ import numpy as np
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_percentage_error
-from sklearn.ensemble import RandomForestRegressor, Ridge
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
 from xgboost import XGBRegressor
 
 # =========================================================
