@@ -8,20 +8,22 @@ from sklearn.linear_model import Ridge
 from xgboost import XGBRegressor
 
 # =========================================================
-# APP
+# APP TITLE
 # =========================================================
 
-st.title("Kenya Sugar AI Dashboard v4 - Forecasting System")
+st.title("Kenya Sugar AI Forecasting System (v4)")
 
-uploaded_file = st.file_uploader("Upload Dataset (2020–2025)", type=["csv"])
+# =========================================================
+# LOAD DATA FROM GITHUB (FIXED)
+# =========================================================
 
-if uploaded_file is not None:
+@st.cache_data
+def load_data():
 
-    # =====================================================
-    # LOAD DATA
-    # =====================================================
+    url = "https://raw.githubusercontent.com/Abeeriik/sugar-ai-forecast/main/Integrated_Sugar_Forecasting_Data.csv"
 
-    df = pd.read_csv(uploaded_file)
+    df = pd.read_csv(url)
+
     df.columns = df.columns.str.strip()
 
     df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
@@ -29,206 +31,204 @@ if uploaded_file is not None:
 
     df = df.sort_values("Date").reset_index(drop=True)
 
-    df["Month"] = df["Date"].dt.month
-    df["Year"] = df["Date"].dt.year
+    return df
 
-    # =====================================================
-    # FEATURES ENGINEERING
-    # =====================================================
 
-    df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Sug_Sales"] + 1)
-    df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
+df = load_data()
 
-    df["sin_month"] = np.sin(2 * np.pi * df["Month"] / 12)
-    df["cos_month"] = np.cos(2 * np.pi * df["Month"] / 12)
+st.subheader("Dataset Preview")
+st.dataframe(df.head())
 
-    df = df.dropna().reset_index(drop=True)
+# =========================================================
+# FEATURE ENGINEERING
+# =========================================================
 
-    # =====================================================
-    # SPLIT
-    # =====================================================
+df["Month"] = df["Date"].dt.month
+df["Year"] = df["Date"].dt.year
 
-    train_df = df[df["Year"] <= 2024]
-    test_df = df[df["Year"] == 2025]
+df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Sug_Sales"] + 1)
+df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
 
-    # =====================================================
-    # FEATURES & TARGETS
-    # =====================================================
+df["sin_month"] = np.sin(2 * np.pi * df["Month"] / 12)
+df["cos_month"] = np.cos(2 * np.pi * df["Month"] / 12)
 
-    features = [
-        "Sug_Sales",
-        "Sug_Closing_Stock",
-        "Cane_Crushed",
-        "Sugar_Made",
-        "Molasses_Sales",
-        "Molasses_Closing_Stocks",
-        "Molasses_Price",
-        "ExFactory_Sug50kg_Price",
-        "WS_Sug50kg_Price",
-        "Month",
-        "Year",
-        "stock_pressure",
-        "import_dependency",
-        "sin_month",
-        "cos_month"
-    ]
+df = df.dropna().reset_index(drop=True)
 
-    targets = [
-        "Sug_Production",
-        "Molasses_Prod",
-        "Sugar_Imports",
-        "Retail_Sug1kg_Price"
-    ]
+# =========================================================
+# SPLIT
+# =========================================================
 
-    # =====================================================
-    # STORAGE
-    # =====================================================
+train_df = df[df["Year"] <= 2024]
+test_df = df[df["Year"] == 2025]
 
-    results = {}
-    forecast_results = {}
+# =========================================================
+# FEATURES & TARGETS
+# =========================================================
 
-    st.subheader("Model Training & Performance (2025)")
+features = [
+    "Sug_Sales",
+    "Sug_Closing_Stock",
+    "Cane_Crushed",
+    "Sugar_Made",
+    "Molasses_Sales",
+    "Molasses_Closing_Stocks",
+    "Molasses_Price",
+    "ExFactory_Sug50kg_Price",
+    "WS_Sug50kg_Price",
+    "Month",
+    "Year",
+    "stock_pressure",
+    "import_dependency",
+    "sin_month",
+    "cos_month"
+]
 
-    # =====================================================
-    # TRAIN MODELS
-    # =====================================================
+targets = [
+    "Sug_Production",
+    "Molasses_Prod",
+    "Sugar_Imports",
+    "Retail_Sug1kg_Price"
+]
 
-    for target in targets:
+# =========================================================
+# STORAGE
+# =========================================================
 
-        X_train = train_df[features]
-        y_train = train_df[target]
+results = {}
+forecast_results = {}
 
-        X_test = test_df[features]
-        y_test = test_df[target]
+st.subheader("Model Performance (2025)")
 
-        rf = RandomForestRegressor(n_estimators=300, random_state=42)
+# =========================================================
+# TRAIN MODELS
+# =========================================================
 
-        xgb = XGBRegressor(
-            n_estimators=200,
-            learning_rate=0.05,
-            max_depth=4,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42
-        )
+for target in targets:
 
-        ridge = Ridge()
+    X_train = train_df[features]
+    y_train = train_df[target]
 
-        rf.fit(X_train, y_train)
-        xgb.fit(X_train, y_train)
-        ridge.fit(X_train, y_train)
+    X_test = test_df[features]
+    y_test = test_df[target]
 
-        rf_pred = rf.predict(X_test)
-        xgb_pred = xgb.predict(X_test)
-        ridge_pred = ridge.predict(X_test)
+    rf = RandomForestRegressor(n_estimators=300, random_state=42)
 
-        ensemble_pred = (0.4 * rf_pred) + (0.4 * xgb_pred) + (0.2 * ridge_pred)
-
-        std_dev = np.std([rf_pred, xgb_pred, ridge_pred], axis=0)
-
-        lower = ensemble_pred - 1.5 * std_dev
-        upper = ensemble_pred + 1.5 * std_dev
-
-        mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
-        accuracy = (1 - mape) * 100
-
-        results[target] = {
-            "MAPE": mape,
-            "Accuracy (%)": accuracy
-        }
-
-        forecast_results[target] = {
-            "actual": y_test.values,
-            "predicted": ensemble_pred,
-            "lower": lower,
-            "upper": upper
-        }
-
-    # =====================================================
-    # RESULTS TABLE
-    # =====================================================
-
-    st.subheader("Model Performance Table")
-    st.dataframe(pd.DataFrame(results).T)
-
-    # =====================================================
-    # 2025 PLOT
-    # =====================================================
-
-    st.subheader("2025 Actual vs Forecast")
-
-    selected = st.selectbox("Select Variable", targets)
-
-    data = forecast_results[selected]
-
-    fig, ax = plt.subplots()
-
-    ax.plot(data["actual"], label="Actual", marker="o")
-    ax.plot(data["predicted"], label="Forecast", marker="o")
-
-    ax.fill_between(
-        range(len(data["actual"])),
-        data["lower"],
-        data["upper"],
-        alpha=0.2,
-        label="Confidence Interval"
+    xgb = XGBRegressor(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=4,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42
     )
 
-    ax.legend()
-    ax.set_title(selected)
+    ridge = Ridge()
 
-    st.pyplot(fig)
+    rf.fit(X_train, y_train)
+    xgb.fit(X_train, y_train)
+    ridge.fit(X_train, y_train)
 
-    # =====================================================
-    # 2026 FORECAST
-    # =====================================================
+    rf_pred = rf.predict(X_test)
+    xgb_pred = xgb.predict(X_test)
+    ridge_pred = ridge.predict(X_test)
 
-    st.subheader("2026 Forecast Projections")
+    ensemble_pred = (0.4 * rf_pred) + (0.4 * xgb_pred) + (0.2 * ridge_pred)
 
-    future_dates = pd.date_range(start="2026-01-01", periods=12, freq="MS")
+    std_dev = np.std([rf_pred, xgb_pred, ridge_pred], axis=0)
 
-    future_df = pd.DataFrame({"Date": future_dates})
+    lower = ensemble_pred - 1.5 * std_dev
+    upper = ensemble_pred + 1.5 * std_dev
 
-    future_df["Month"] = future_df["Date"].dt.month
-    future_df["Year"] = future_df["Date"].dt.year
+    mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
+    accuracy = (1 - mape) * 100
 
-    for col in features:
-        if col not in ["Month", "Year", "sin_month", "cos_month"]:
-            future_df[col] = df[col].iloc[-1]
+    results[target] = {
+        "MAPE": mape,
+        "Accuracy (%)": accuracy
+    }
 
-    future_df["sin_month"] = np.sin(2 * np.pi * future_df["Month"] / 12)
-    future_df["cos_month"] = np.cos(2 * np.pi * future_df["Month"] / 12)
+    forecast_results[target] = {
+        "actual": y_test.values,
+        "predicted": ensemble_pred,
+        "lower": lower,
+        "upper": upper
+    }
 
-    forecast_2026 = {}
+# =========================================================
+# TABLE
+# =========================================================
 
-    for target in targets:
+st.subheader("Model Performance Table")
+st.dataframe(pd.DataFrame(results).T)
 
-        rf.fit(df[features], df[target])
-        xgb.fit(df[features], df[target])
+# =========================================================
+# 2025 PLOT
+# =========================================================
 
-        rf_pred = rf.predict(future_df[features])
-        xgb_pred = xgb.predict(future_df[features])
+st.subheader("2025 Actual vs Forecast")
 
-        forecast_2026[target] = (0.5 * rf_pred + 0.5 * xgb_pred)
+selected = st.selectbox("Select Variable", targets)
 
-    forecast_table = pd.DataFrame(forecast_2026)
-    forecast_table.insert(0, "Date", future_dates)
+data = forecast_results[selected]
 
-    st.subheader("2026 Forecast Table")
-    st.dataframe(forecast_table)
+fig, ax = plt.subplots()
 
-    # =====================================================
-    # 2026 PLOT
-    # =====================================================
+ax.plot(data["actual"], label="Actual", marker="o")
+ax.plot(data["predicted"], label="Forecast", marker="o")
 
-    fig2, ax2 = plt.subplots()
+ax.fill_between(
+    range(len(data["actual"])),
+    data["lower"],
+    data["upper"],
+    alpha=0.2,
+    label="Confidence Interval"
+)
 
-    for col in targets:
-        ax2.plot(forecast_table["Date"], forecast_table[col], label=col)
+ax.legend()
+st.pyplot(fig)
 
-    ax2.legend()
-    ax2.set_title("2026 Forecast")
+# =========================================================
+# 2026 FORECAST
+# =========================================================
 
-    plt.xticks(rotation=45)
+st.subheader("2026 Forecast Projections")
 
-    st.pyplot(fig2)
+future_dates = pd.date_range(start="2026-01-01", periods=12, freq="MS")
+
+future_df = pd.DataFrame({"Date": future_dates})
+
+future_df["Month"] = future_df["Date"].dt.month
+future_df["Year"] = future_df["Date"].dt.year
+
+for col in features:
+    if col not in ["Month", "Year", "sin_month", "cos_month"]:
+        future_df[col] = df[col].iloc[-1]
+
+future_df["sin_month"] = np.sin(2 * np.pi * future_df["Month"] / 12)
+future_df["cos_month"] = np.cos(2 * np.pi * future_df["Month"] / 12)
+
+forecast_2026 = {}
+
+for target in targets:
+
+    rf.fit(df[features], df[target])
+    xgb.fit(df[features], df[target])
+
+    rf_pred = rf.predict(future_df[features])
+    xgb_pred = xgb.predict(future_df[features])
+
+    forecast_2026[target] = (0.5 * rf_pred + 0.5 * xgb_pred)
+
+forecast_table = pd.DataFrame(forecast_2026)
+forecast_table.insert(0, "Date", future_dates)
+
+st.subheader("2026 Forecast Table")
+st.dataframe(forecast_table)
+
+fig2, ax2 = plt.subplots()
+
+for col in targets:
+    ax2.plot(forecast_table["Date"], forecast_table[col], label=col)
+
+ax2.legend()
+st.pyplot(fig2)
