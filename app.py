@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
@@ -9,164 +10,178 @@ import matplotlib.pyplot as plt
 
 st.title("Kenya Sugar AI Dashboard v3 (Advanced Forecasting System)")
 
-uploaded_file = st.file_uploader("Upload Full Dataset (2020–2025)", type=["csv"])
+# =========================
+# DATA LOADING (CLOUD SAFE)
+# =========================
+
+uploaded_file = st.file_uploader("Upload Full Dataset (CSV)", type=["csv"])
+
+DATA_PATH = "Integrated_Sugar_Forecasting_Data.csv"
 
 if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
 
-    # =========================
-    # LOAD DATA
-    import os
-    # =========================
-    df = pd.read_csv(DATA_PATH)
-    DATA_PATH = "Integrated_Sugar_Forecasting_Data.csv"
-
-    if not os.path.exists(DATA_PATH):
-        st.error(f"Dataset file not found: {DATA_PATH}")
+else:
+    if os.path.exists(DATA_PATH):
+        df = pd.read_csv(DATA_PATH)
+    else:
+        st.error("Dataset not found. Please upload a CSV or add it to the repo.")
         st.stop()
-    df = pd.read_csv(DATA_PATH)
 
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
+# =========================
+# PREPROCESSING
+# =========================
 
-    st.subheader("Raw Data Preview")
-    st.dataframe(df.head())
+df["Date"] = pd.to_datetime(df["Date"])
+df = df.sort_values("Date")
 
-    # =========================
-    # FEATURE ENGINEERING
-    # =========================
-    df["Month"] = df["Date"].dt.month
-    df["Year"] = df["Date"].dt.year
+st.subheader("Raw Data Preview")
+st.dataframe(df.head())
 
-    for col in ["Sug_Production", "Molasses_Prod", "Sugar_Imports", "Retail_Sug1kg_Price"]:
-        df[f"{col}_lag1"] = df[col].shift(1)
-        df[f"{col}_lag2"] = df[col].shift(2)
+# =========================
+# FEATURE ENGINEERING
+# =========================
 
-    df["prod_roll3"] = df["Sug_Production"].rolling(3).mean()
-    df["molasses_roll3"] = df["Molasses_Prod"].rolling(3).mean()
+df["Month"] = df["Date"].dt.month
+df["Year"] = df["Date"].dt.year
 
-    df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Sug_Sales"] + 1)
-    df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
+for col in ["Sug_Production", "Molasses_Prod", "Sugar_Imports", "Retail_Sug1kg_Price"]:
+    df[f"{col}_lag1"] = df[col].shift(1)
+    df[f"{col}_lag2"] = df[col].shift(2)
 
-    df = df.dropna()
+df["prod_roll3"] = df["Sug_Production"].rolling(3).mean()
+df["molasses_roll3"] = df["Molasses_Prod"].rolling(3).mean()
 
-    # =========================
-    # TRAIN / TEST SPLIT (REAL 2025 TEST)
-    # =========================
-    train_df = df[df["Date"].dt.year <= 2024]
-    test_df = df[df["Date"].dt.year == 2025]
+df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Sug_Sales"] + 1)
+df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
 
-    st.subheader("Data Split")
-    st.write("Train:", len(train_df))
-    st.write("Test (2025):", len(test_df))
+df = df.dropna()
 
-    # =========================
-    # FEATURES & TARGETS
-    # =========================
-    features = [
-        "Sug_Sales",
-        "Sug_Closing_Stock",
-        "Cane_Crushed",
-        "Sugar_Made",
-        "Molasses_Sales",
-        "Molasses_Closing_Stocks",
-        "Molasses_Price",
-        "ExFactory_Sug50kg_Price",
-        "WS_Sug50kg_Price",
-        "Month",
-        "Year",
-        "stock_pressure",
-        "import_dependency"
-    ]
+# =========================
+# TRAIN / TEST SPLIT
+# =========================
 
-    targets = [
-        "Sug_Production",
-        "Molasses_Prod",
-        "Sugar_Imports",
-        "Retail_Sug1kg_Price"
-    ]
+train_df = df[df["Date"].dt.year <= 2024]
+test_df = df[df["Date"].dt.year == 2025]
 
-    # =========================
-    # STORE RESULTS
-    # =========================
-    results = {}
-    forecast_results = {}
+st.subheader("Data Split")
+st.write("Train:", len(train_df))
+st.write("Test (2025):", len(test_df))
 
-    st.subheader("📊 Model Training & Evaluation")
+# =========================
+# FEATURES & TARGETS
+# =========================
 
-    # =========================
-    # MODEL LOOP
-    # =========================
-    for target in targets:
+features = [
+    "Sug_Sales",
+    "Sug_Closing_Stock",
+    "Cane_Crushed",
+    "Sugar_Made",
+    "Molasses_Sales",
+    "Molasses_Closing_Stocks",
+    "Molasses_Price",
+    "ExFactory_Sug50kg_Price",
+    "WS_Sug50kg_Price",
+    "Month",
+    "Year",
+    "stock_pressure",
+    "import_dependency"
+]
 
-        X_train = train_df[features]
-        y_train = train_df[target]
+targets = [
+    "Sug_Production",
+    "Molasses_Prod",
+    "Sugar_Imports",
+    "Retail_Sug1kg_Price"
+]
 
-        X_test = test_df[features]
-        y_test = test_df[target]
+# =========================
+# STORAGE
+# =========================
 
-        # MODELS
-        rf = RandomForestRegressor(n_estimators=300, random_state=42)
-        ridge = Ridge()
+results = {}
+forecast_results = {}
 
-        rf.fit(X_train, y_train)
-        ridge.fit(X_train, y_train)
+st.subheader("📊 Model Training & Evaluation")
 
-        rf_pred = rf.predict(X_test)
-        ridge_pred = ridge.predict(X_test)
+# =========================
+# MODEL LOOP
+# =========================
 
-        # ENSEMBLE (AVERAGE)
-        ensemble_pred = (rf_pred + ridge_pred) / 2
+for target in targets:
 
-        # CONFIDENCE BAND (simple uncertainty estimate)
-        std_dev = np.std([rf_pred, ridge_pred], axis=0)
+    X_train = train_df[features]
+    y_train = train_df[target]
 
-        lower = ensemble_pred - 1.5 * std_dev
-        upper = ensemble_pred + 1.5 * std_dev
+    X_test = test_df[features]
+    y_test = test_df[target]
 
-        # ACCURACY (ensemble)
-        mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
-        accuracy = (1 - mape) * 100
+    # Models
+    rf = RandomForestRegressor(n_estimators=300, random_state=42)
+    ridge = Ridge()
 
-        results[target] = {
-            "MAPE": mape,
-            "Accuracy": accuracy
-        }
+    rf.fit(X_train, y_train)
+    ridge.fit(X_train, y_train)
 
-        forecast_results[target] = {
-            "actual": y_test.values,
-            "predicted": ensemble_pred,
-            "lower": lower,
-            "upper": upper
-        }
+    rf_pred = rf.predict(X_test)
+    ridge_pred = ridge.predict(X_test)
 
-    # =========================
-    # RESULTS TABLE
-    # =========================
-    st.subheader("📈 Model Performance Summary")
-    st.dataframe(pd.DataFrame(results).T)
+    # Ensemble
+    ensemble_pred = (rf_pred + ridge_pred) / 2
 
-    # =========================
-    # VISUAL DASHBOARD
-    # =========================
-    st.subheader("📊 Forecast vs Actual Dashboard (2025)")
+    # Uncertainty band
+    std_dev = np.std([rf_pred, ridge_pred], axis=0)
 
-    selected_target = st.selectbox("Select Variable", targets)
+    lower = ensemble_pred - 1.5 * std_dev
+    upper = ensemble_pred + 1.5 * std_dev
 
-    data = forecast_results[selected_target]
+    # Accuracy
+    mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
+    accuracy = (1 - mape) * 100
 
-    fig, ax = plt.subplots()
+    results[target] = {
+        "MAPE": mape,
+        "Accuracy (%)": accuracy
+    }
 
-    ax.plot(data["actual"], label="Actual", marker="o")
-    ax.plot(data["predicted"], label="Forecast (Ensemble)", marker="o")
-    ax.fill_between(
-        range(len(data["actual"])),
-        data["lower"],
-        data["upper"],
-        alpha=0.2,
-        label="Confidence Range"
-    )
+    forecast_results[target] = {
+        "actual": y_test.values,
+        "predicted": ensemble_pred,
+        "lower": lower,
+        "upper": upper
+    }
 
-    ax.set_title(f"{selected_target} Forecast vs Actual (2025)")
-    ax.legend()
+# =========================
+# RESULTS TABLE
+# =========================
 
-    st.pyplot(fig)
+st.subheader("📈 Model Performance Summary")
+st.dataframe(pd.DataFrame(results).T)
+
+# =========================
+# VISUALIZATION
+# =========================
+
+st.subheader("📊 Forecast vs Actual Dashboard (2025)")
+
+selected_target = st.selectbox("Select Variable", targets)
+
+data = forecast_results[selected_target]
+
+fig, ax = plt.subplots()
+
+ax.plot(data["actual"], label="Actual", marker="o")
+ax.plot(data["predicted"], label="Forecast (Ensemble)", marker="o")
+
+ax.fill_between(
+    range(len(data["actual"])),
+    data["lower"],
+    data["upper"],
+    alpha=0.2,
+    label="Confidence Range"
+)
+
+ax.set_title(f"{selected_target} Forecast vs Actual (2025)")
+ax.legend()
+
+st.pyplot(fig)
