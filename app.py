@@ -5,7 +5,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_percentage_error
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
 from xgboost import XGBRegressor
 
 # =========================================================
@@ -13,7 +12,28 @@ from xgboost import XGBRegressor
 # =========================================================
 
 df = pd.read_csv("Integrated_Sugar_Forecasting_Data.csv")
-df = df.sort_values(["Year", "Month"]).reset_index(drop=True)
+
+# =========================================================
+# CLEAN COLUMN NAMES
+# =========================================================
+
+df.columns = df.columns.str.strip()
+
+# =========================================================
+# HANDLE DATE COLUMN (YOUR DATA STRUCTURE)
+# =========================================================
+
+# First column is assumed to be Date
+df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+
+df.rename(columns={df.columns[0]: "Date"}, inplace=True)
+
+# Extract time features
+df["Year"] = df["Date"].dt.year
+df["Month"] = df["Date"].dt.month
+
+# Sort properly
+df = df.sort_values("Date").reset_index(drop=True)
 
 # =========================================================
 # FEATURE ENGINEERING
@@ -22,7 +42,7 @@ df = df.sort_values(["Year", "Month"]).reset_index(drop=True)
 df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Cane_Crushed"] + 1)
 df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Sales"] + 1)
 
-# seasonality
+# seasonality encoding
 df["sin_month"] = np.sin(2 * np.pi * df["Month"] / 12)
 df["cos_month"] = np.cos(2 * np.pi * df["Month"] / 12)
 
@@ -79,9 +99,9 @@ for name, target in targets.items():
         X, y, test_size=0.2, shuffle=False
     )
 
-    # ----------------------------
-    # MODEL SELECTION LOGIC
-    # ----------------------------
+    # -----------------------------------------------------
+    # MODEL SELECTION
+    # -----------------------------------------------------
 
     if name in ["Sugar_Imports", "Retail_Sug1kg_Price"]:
         model = XGBRegressor(
@@ -120,15 +140,17 @@ print("\nMODEL PERFORMANCE")
 print(performance_df)
 
 # =========================================================
-# 2026 FORECASTING
+# 2026 FORECASTING (DATE-BASED)
 # =========================================================
 
 future = pd.DataFrame({
-    "Year": [2026] * 12,
-    "Month": range(1, 13)
+    "Date": pd.date_range(start="2026-01-01", periods=12, freq="MS")
 })
 
-# carry forward latest values
+future["Year"] = future["Date"].dt.year
+future["Month"] = future["Date"].dt.month
+
+# carry last known values
 for col in features:
     if col not in ["Month", "Year", "sin_month", "cos_month"]:
         future[col] = df[col].iloc[-1]
@@ -145,12 +167,11 @@ for name, model in models.items():
     future[f"Forecast_{name}"] = model.predict(future[features])
 
 # =========================================================
-# OUTPUT TABLE
+# FINAL OUTPUT TABLE
 # =========================================================
 
 forecast_table = future[
-    ["Year", "Month"] +
-    [f"Forecast_{k}" for k in targets.keys()]
+    ["Date"] + [f"Forecast_{k}" for k in targets.keys()]
 ]
 
 print("\n2026 FORECAST")
