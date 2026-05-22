@@ -11,12 +11,12 @@ import matplotlib.pyplot as plt
 # =========================
 # APP TITLE
 # =========================
-st.title("Kenya Sugar AI Dashboard v3 (Advanced Forecasting System)")
+st.title("Kenya Sugar AI Dashboard v4 (2025 Evaluation + 2026 Forecasting)")
 
 # =========================
-# DATA LOADING (CLOUD SAFE)
+# DATA LOADING
 # =========================
-uploaded_file = st.file_uploader("Upload Full Dataset (CSV)", type=["csv"])
+uploaded_file = st.file_uploader("Upload Dataset (CSV)", type=["csv"])
 
 DATA_PATH = "Integrated_Sugar_Forecasting_Data.csv"
 
@@ -93,16 +93,13 @@ targets = [
 ]
 
 # =========================
-# STORAGE
+# MODEL TRAINING + EVALUATION
 # =========================
 results = {}
-forecast_results = {}
+forecast_2025 = {}
 
-st.subheader("📊 Model Training & Evaluation")
+st.subheader("📊 Model Training & 2025 Evaluation")
 
-# =========================
-# MODEL TRAINING LOOP
-# =========================
 for target in targets:
 
     X_train = train_df[features]
@@ -122,10 +119,6 @@ for target in targets:
 
     ensemble_pred = (rf_pred + ridge_pred) / 2
 
-    std_dev = np.std([rf_pred, ridge_pred], axis=0)
-    lower = ensemble_pred - 1.5 * std_dev
-    upper = ensemble_pred + 1.5 * std_dev
-
     mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
     accuracy = (1 - mape) * 100
 
@@ -134,78 +127,125 @@ for target in targets:
         "Accuracy (%)": accuracy
     }
 
-    forecast_results[target] = {
+    forecast_2025[target] = {
         "actual": y_test.values,
-        "predicted": ensemble_pred,
-        "lower": lower,
-        "upper": upper
+        "predicted": ensemble_pred
     }
 
 # =========================
 # MODEL REPORT
 # =========================
-st.subheader("📄 Model Report Summary")
+st.subheader("📄 Model Report")
 
 st.markdown("""
 ### Models Used
 - Random Forest Regressor (300 trees)
 - Ridge Regression
-- Ensemble (Average of both models)
+- Ensemble Averaging
 
-### Methodology
-- Train/Test split: 2020–2024 vs 2025
-- Feature engineering:
-  - Lag features (1–2 months)
-  - Rolling averages (3-month)
-  - Stock pressure ratio
-  - Import dependency ratio
+### Feature Engineering
+- Lag features (1–2 months)
+- Rolling averages (3-month)
+- Stock pressure ratio
+- Import dependency ratio
 
-### Evaluation Metric
-- MAPE (Mean Absolute Percentage Error)
+### Evaluation
+- MAPE used for error
 - Accuracy = 1 - MAPE
 """)
 
-st.subheader("📊 Accuracy Breakdown")
+st.subheader("📊 Accuracy Summary")
 st.dataframe(pd.DataFrame(results).T)
 
 # =========================
-# VISUAL + TABLE SECTION
+# VISUAL (2025)
 # =========================
-st.subheader("📊 Forecast Dashboard (2025)")
+st.subheader("📉 2025 Forecast vs Actual")
 
-selected_target = st.selectbox("Select Variable", targets)
-
-data = forecast_results[selected_target]
+selected = st.selectbox("Select Variable (2025)", targets)
 
 fig, ax = plt.subplots()
 
-ax.plot(data["actual"], label="Actual", marker="o")
-ax.plot(data["predicted"], label="Forecast", marker="o")
+ax.plot(forecast_2025[selected]["actual"], label="Actual", marker="o")
+ax.plot(forecast_2025[selected]["predicted"], label="Forecast", marker="o")
 
-ax.fill_between(
-    range(len(data["actual"])),
-    data["lower"],
-    data["upper"],
-    alpha=0.2,
-    label="Confidence Range"
-)
-
+ax.set_title(selected)
 ax.legend()
-ax.set_title(f"{selected_target} Forecast vs Actual (2025)")
 
 st.pyplot(fig)
 
 # =========================
-# MONTHLY FORECAST TABLE
 # =========================
-st.subheader("📅 Monthly Forecast Table")
+# 🔮 2026 FORECAST ENGINE
+# =========================
+# =========================
 
-proj_df = pd.DataFrame({
-    "Month": test_df["Date"].dt.strftime("%Y-%m"),
-    "Actual": data["actual"],
-    "Forecast": data["predicted"],
-    "Lower Bound": data["lower"],
-    "Upper Bound": data["upper"]
+st.subheader("🔮 2026 Forecast Projection")
+
+future_dates = pd.date_range(start="2026-01-01", periods=12, freq="MS")
+
+future_df = pd.DataFrame()
+future_df["Date"] = future_dates
+future_df["Month"] = future_df["Date"].dt.month
+future_df["Year"] = future_df["Date"].dt.year
+
+last = df.iloc[-1]
+
+for col in features:
+    if col in last:
+        future_df[col] = last[col]
+
+# mild trend growth
+for col in ["Sug_Sales", "Sug_Closing_Stock", "Cane_Crushed"]:
+    future_df[col] = last[col] * (1 + 0.01) ** np.arange(12)
+
+future_results = {}
+
+for target in targets:
+
+    X = df[features]
+    y = df[target]
+
+    rf = RandomForestRegressor(n_estimators=300, random_state=42)
+    ridge = Ridge()
+
+    rf.fit(X, y)
+    ridge.fit(X, y)
+
+    rf_pred = rf.predict(future_df[features])
+    ridge_pred = ridge.predict(future_df[features])
+
+    final_pred = (rf_pred + ridge_pred) / 2
+
+    future_results[target] = final_pred
+
+# =========================
+# 2026 TABLE
+# =========================
+forecast_2026 = pd.DataFrame({
+    "Month": future_dates.strftime("%Y-%m"),
+    "Sug_Production": future_results["Sug_Production"],
+    "Molasses_Production": future_results["Molasses_Prod"],
+    "Sugar_Imports": future_results["Sugar_Imports"],
+    "Retail_Price": future_results["Retail_Sug1kg_Price"]
 })
 
-st.dataframe(proj_df)
+st.subheader("📅 2026 Monthly Forecast Table")
+st.dataframe(forecast_2026)
+
+# =========================
+# 2026 CHART
+# =========================
+st.subheader("📊 2026 Forecast Trends")
+
+fig, ax = plt.subplots()
+
+ax.plot(forecast_2026["Sug_Production"], label="Sugar Production")
+ax.plot(forecast_2026["Molasses_Production"], label="Molasses Production")
+ax.plot(forecast_2026["Sugar_Imports"], label="Imports")
+ax.plot(forecast_2026["Retail_Price"], label="Retail Price")
+
+ax.legend()
+ax.set_title("2026 Forecast Trends")
+
+st.pyplot(fig)
