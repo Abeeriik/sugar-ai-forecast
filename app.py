@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,44 +8,33 @@ from sklearn.linear_model import Ridge
 from xgboost import XGBRegressor
 
 # =========================================================
-# APP TITLE
+# APP
 # =========================================================
 
-st.title("Kenya Sugar AI Dashboard v4 (Enhanced Forecasting System)")
-
-# =========================================================
-# UPLOAD DATA
-# =========================================================
+st.title("Kenya Sugar AI Dashboard v4 - Forecasting System")
 
 uploaded_file = st.file_uploader("Upload Dataset (2020–2025)", type=["csv"])
 
 if uploaded_file is not None:
 
+    # =====================================================
+    # LOAD DATA
+    # =====================================================
+
     df = pd.read_csv(uploaded_file)
-
-    # =====================================================
-    # DATE HANDLING (FIXED FOR YOUR DATA)
-    # =====================================================
-
     df.columns = df.columns.str.strip()
+
     df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
     df.rename(columns={df.columns[0]: "Date"}, inplace=True)
 
-    df = df.sort_values("Date")
+    df = df.sort_values("Date").reset_index(drop=True)
 
     df["Month"] = df["Date"].dt.month
     df["Year"] = df["Date"].dt.year
 
     # =====================================================
-    # FEATURE ENGINEERING
+    # FEATURES ENGINEERING
     # =====================================================
-
-    for col in ["Sug_Production", "Molasses_Prod", "Sugar_Imports", "Retail_Sug1kg_Price"]:
-        df[f"{col}_lag1"] = df[col].shift(1)
-        df[f"{col}_lag2"] = df[col].shift(2)
-
-    df["prod_roll3"] = df["Sug_Production"].rolling(3).mean()
-    df["molasses_roll3"] = df["Molasses_Prod"].rolling(3).mean()
 
     df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Sug_Sales"] + 1)
     df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
@@ -57,7 +45,7 @@ if uploaded_file is not None:
     df = df.dropna().reset_index(drop=True)
 
     # =====================================================
-    # TRAIN / TEST SPLIT
+    # SPLIT
     # =====================================================
 
     train_df = df[df["Year"] <= 2024]
@@ -99,10 +87,10 @@ if uploaded_file is not None:
     results = {}
     forecast_results = {}
 
-    st.subheader("📊 Model Training & Evaluation")
+    st.subheader("Model Training & Performance (2025)")
 
     # =====================================================
-    # MODEL TRAINING
+    # TRAIN MODELS
     # =====================================================
 
     for target in targets:
@@ -113,7 +101,6 @@ if uploaded_file is not None:
         X_test = test_df[features]
         y_test = test_df[target]
 
-        # MODELS
         rf = RandomForestRegressor(n_estimators=300, random_state=42)
 
         xgb = XGBRegressor(
@@ -135,16 +122,13 @@ if uploaded_file is not None:
         xgb_pred = xgb.predict(X_test)
         ridge_pred = ridge.predict(X_test)
 
-        # ENSEMBLE (balanced)
         ensemble_pred = (0.4 * rf_pred) + (0.4 * xgb_pred) + (0.2 * ridge_pred)
 
-        # CONFIDENCE INTERVAL
         std_dev = np.std([rf_pred, xgb_pred, ridge_pred], axis=0)
 
         lower = ensemble_pred - 1.5 * std_dev
         upper = ensemble_pred + 1.5 * std_dev
 
-        # ACCURACY
         mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
         accuracy = (1 - mape) * 100
 
@@ -161,17 +145,17 @@ if uploaded_file is not None:
         }
 
     # =====================================================
-    # PERFORMANCE TABLE
+    # RESULTS TABLE
     # =====================================================
 
-    st.subheader("📈 Model Performance Summary")
+    st.subheader("Model Performance Table")
     st.dataframe(pd.DataFrame(results).T)
 
     # =====================================================
-    # 2025 VISUALIZATION
+    # 2025 PLOT
     # =====================================================
 
-    st.subheader("📊 2025 Actual vs Forecast")
+    st.subheader("2025 Actual vs Forecast")
 
     selected = st.selectbox("Select Variable", targets)
 
@@ -190,8 +174,8 @@ if uploaded_file is not None:
         label="Confidence Interval"
     )
 
-    ax.set_title(f"{selected} - 2025 Performance")
     ax.legend()
+    ax.set_title(selected)
 
     st.pyplot(fig)
 
@@ -199,18 +183,15 @@ if uploaded_file is not None:
     # 2026 FORECAST
     # =====================================================
 
-    st.subheader("📊 2026 Forecast Projections")
+    st.subheader("2026 Forecast Projections")
 
     future_dates = pd.date_range(start="2026-01-01", periods=12, freq="MS")
 
-    future_df = pd.DataFrame({
-        "Date": future_dates
-    })
+    future_df = pd.DataFrame({"Date": future_dates})
 
     future_df["Month"] = future_df["Date"].dt.month
     future_df["Year"] = future_df["Date"].dt.year
 
-    # carry last known values
     for col in features:
         if col not in ["Month", "Year", "sin_month", "cos_month"]:
             future_df[col] = df[col].iloc[-1]
@@ -233,22 +214,21 @@ if uploaded_file is not None:
     forecast_table = pd.DataFrame(forecast_2026)
     forecast_table.insert(0, "Date", future_dates)
 
-    st.subheader("📋 2026 Forecast Table")
+    st.subheader("2026 Forecast Table")
     st.dataframe(forecast_table)
 
     # =====================================================
     # 2026 PLOT
     # =====================================================
 
-    st.subheader("📈 2026 Forecast Trends")
-
     fig2, ax2 = plt.subplots()
 
     for col in targets:
         ax2.plot(forecast_table["Date"], forecast_table[col], label=col)
 
-    ax2.set_title("2026 Sugar Industry Forecasts")
     ax2.legend()
+    ax2.set_title("2026 Forecast")
+
     plt.xticks(rotation=45)
 
     st.pyplot(fig2)
