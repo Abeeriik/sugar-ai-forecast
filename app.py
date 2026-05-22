@@ -8,10 +8,15 @@ from sklearn.linear_model import Ridge
 
 import matplotlib.pyplot as plt
 
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import tempfile
+
 # =========================
 # APP TITLE
 # =========================
-st.title("Kenya Sugar AI Dashboard v4 (2025 Evaluation + 2026 Forecasting)")
+st.title("Kenya Sugar AI Dashboard v4 (Forecasting + PDF Reporting)")
 
 # =========================
 # DATA LOADING
@@ -48,9 +53,6 @@ for col in ["Sug_Production", "Molasses_Prod", "Sugar_Imports", "Retail_Sug1kg_P
     df[f"{col}_lag1"] = df[col].shift(1)
     df[f"{col}_lag2"] = df[col].shift(2)
 
-df["prod_roll3"] = df["Sug_Production"].rolling(3).mean()
-df["molasses_roll3"] = df["Molasses_Prod"].rolling(3).mean()
-
 df["stock_pressure"] = df["Sug_Closing_Stock"] / (df["Sug_Sales"] + 1)
 df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
 
@@ -62,12 +64,12 @@ df = df.dropna()
 train_df = df[df["Date"].dt.year <= 2024]
 test_df = df[df["Date"].dt.year == 2025]
 
-st.subheader("Data Split")
-st.write("Train:", len(train_df))
-st.write("Test (2025):", len(test_df))
+st.subheader("Train/Test Split")
+st.write("Train rows:", len(train_df))
+st.write("Test rows (2025):", len(test_df))
 
 # =========================
-# FEATURES & TARGETS
+# FEATURES / TARGETS
 # =========================
 features = [
     "Sug_Sales",
@@ -93,12 +95,12 @@ targets = [
 ]
 
 # =========================
-# MODEL TRAINING + EVALUATION
+# MODEL TRAINING
 # =========================
 results = {}
-forecast_2025 = {}
+pred_2025 = {}
 
-st.subheader("📊 Model Training & 2025 Evaluation")
+st.subheader("Model Training (2025 Evaluation)")
 
 for target in targets:
 
@@ -117,9 +119,9 @@ for target in targets:
     rf_pred = rf.predict(X_test)
     ridge_pred = ridge.predict(X_test)
 
-    ensemble_pred = (rf_pred + ridge_pred) / 2
+    ensemble = (rf_pred + ridge_pred) / 2
 
-    mape = np.mean(np.abs((y_test - ensemble_pred) / y_test))
+    mape = np.mean(np.abs((y_test - ensemble) / y_test))
     accuracy = (1 - mape) * 100
 
     results[target] = {
@@ -127,62 +129,41 @@ for target in targets:
         "Accuracy (%)": accuracy
     }
 
-    forecast_2025[target] = {
-        "actual": y_test.values,
-        "predicted": ensemble_pred
-    }
+    pred_2025[target] = ensemble
 
 # =========================
-# MODEL REPORT
+# RESULTS TABLE
 # =========================
-st.subheader("📄 Model Report")
-
-st.markdown("""
-### Models Used
-- Random Forest Regressor (300 trees)
-- Ridge Regression
-- Ensemble Averaging
-
-### Feature Engineering
-- Lag features (1–2 months)
-- Rolling averages (3-month)
-- Stock pressure ratio
-- Import dependency ratio
-
-### Evaluation
-- MAPE used for error
-- Accuracy = 1 - MAPE
-""")
-
-st.subheader("📊 Accuracy Summary")
+st.subheader("Accuracy Summary")
 st.dataframe(pd.DataFrame(results).T)
 
 # =========================
-# VISUAL (2025)
+# 2025 VISUALIZATION
 # =========================
-st.subheader("📉 2025 Forecast vs Actual")
+st.subheader("2025 Forecast vs Actual")
 
-selected = st.selectbox("Select Variable (2025)", targets)
+selected = st.selectbox("Select Variable", targets)
 
 fig, ax = plt.subplots()
 
-ax.plot(forecast_2025[selected]["actual"], label="Actual", marker="o")
-ax.plot(forecast_2025[selected]["predicted"], label="Forecast", marker="o")
+ax.plot(test_df[selected].values, label="Actual", marker="o")
+ax.plot(pred_2025[selected], label="Forecast", marker="o")
 
-ax.set_title(selected)
 ax.legend()
+ax.set_title(selected)
 
 st.pyplot(fig)
 
-# =========================
-# =========================
-# 🔮 2026 FORECAST ENGINE
-# =========================
-# =========================
+# Save chart for PDF
+chart_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+fig.savefig(chart_path)
 
-st.subheader("🔮 2026 Forecast Projection")
+# =========================
+# 2026 FORECAST
+# =========================
+st.subheader("2026 Forecast Projection")
 
-future_dates = pd.date_range(start="2026-01-01", periods=12, freq="MS")
+future_dates = pd.date_range("2026-01-01", periods=12, freq="MS")
 
 future_df = pd.DataFrame()
 future_df["Date"] = future_dates
@@ -195,11 +176,10 @@ for col in features:
     if col in last:
         future_df[col] = last[col]
 
-# mild trend growth
 for col in ["Sug_Sales", "Sug_Closing_Stock", "Cane_Crushed"]:
     future_df[col] = last[col] * (1 + 0.01) ** np.arange(12)
 
-future_results = {}
+forecast_2026 = {}
 
 for target in targets:
 
@@ -212,40 +192,114 @@ for target in targets:
     rf.fit(X, y)
     ridge.fit(X, y)
 
-    rf_pred = rf.predict(future_df[features])
-    ridge_pred = ridge.predict(future_df[features])
+    forecast_2026[target] = (rf.predict(future_df[features]) + ridge.predict(future_df[features])) / 2
 
-    final_pred = (rf_pred + ridge_pred) / 2
-
-    future_results[target] = final_pred
-
-# =========================
-# 2026 TABLE
-# =========================
-forecast_2026 = pd.DataFrame({
+forecast_df = pd.DataFrame({
     "Month": future_dates.strftime("%Y-%m"),
-    "Sug_Production": future_results["Sug_Production"],
-    "Molasses_Production": future_results["Molasses_Prod"],
-    "Sugar_Imports": future_results["Sugar_Imports"],
-    "Retail_Price": future_results["Retail_Sug1kg_Price"]
+    "Sug_Production": forecast_2026["Sug_Production"],
+    "Molasses_Production": forecast_2026["Molasses_Prod"],
+    "Sugar_Imports": forecast_2026["Sugar_Imports"],
+    "Retail_Price": forecast_2026["Retail_Sug1kg_Price"]
 })
 
-st.subheader("📅 2026 Monthly Forecast Table")
-st.dataframe(forecast_2026)
+st.dataframe(forecast_df)
 
 # =========================
 # 2026 CHART
 # =========================
-st.subheader("📊 2026 Forecast Trends")
+fig2, ax2 = plt.subplots()
 
-fig, ax = plt.subplots()
+ax2.plot(forecast_df["Sug_Production"], label="Sugar Production")
+ax2.plot(forecast_df["Molasses_Production"], label="Molasses Production")
+ax2.plot(forecast_df["Sugar_Imports"], label="Imports")
+ax2.plot(forecast_df["Retail_Price"], label="Retail Price")
 
-ax.plot(forecast_2026["Sug_Production"], label="Sugar Production")
-ax.plot(forecast_2026["Molasses_Production"], label="Molasses Production")
-ax.plot(forecast_2026["Sugar_Imports"], label="Imports")
-ax.plot(forecast_2026["Retail_Price"], label="Retail Price")
+ax2.legend()
+ax2.set_title("2026 Forecast Trends")
 
-ax.legend()
-ax.set_title("2026 Forecast Trends")
+st.pyplot(fig2)
 
-st.pyplot(fig)
+# =========================
+# PDF GENERATION FUNCTION
+# =========================
+def generate_pdf(results, forecast_df, chart_path):
+
+    file_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+    doc = SimpleDocTemplate(file_path)
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("Kenya Sugar Forecasting AI Report", styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Methodology", styles["Heading2"]))
+    story.append(Paragraph(
+        "Random Forest + Ridge Regression ensemble with lag features, "
+        "stock pressure ratios, and import dependency indicators.",
+        styles["BodyText"]
+    ))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Model Accuracy", styles["Heading2"]))
+
+    acc_table = [["Target", "MAPE", "Accuracy (%)"]]
+    for k, v in results.items():
+        acc_table.append([k, round(v["MAPE"], 4), round(v["Accuracy (%)"], 2)])
+
+    table = Table(acc_table)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+    ]))
+
+    story.append(table)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("2026 Forecast Summary", styles["Heading2"]))
+
+    data_table = [["Month", "Sugar", "Molasses", "Imports", "Price"]]
+
+    for i in range(len(forecast_df)):
+        data_table.append([
+            forecast_df.iloc[i]["Month"],
+            round(forecast_df.iloc[i]["Sug_Production"], 2),
+            round(forecast_df.iloc[i]["Molasses_Production"], 2),
+            round(forecast_df.iloc[i]["Sugar_Imports"], 2),
+            round(forecast_df.iloc[i]["Retail_Price"], 2),
+        ])
+
+    table2 = Table(data_table)
+    table2.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+    ]))
+
+    story.append(table2)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Forecast Chart", styles["Heading2"]))
+    story.append(Image(chart_path, width=400, height=250))
+
+    doc.build(story)
+
+    return file_path
+
+# =========================
+# DOWNLOAD BUTTON
+# =========================
+st.subheader("📄 Download Full Report")
+
+if st.button("Generate PDF Report"):
+
+    pdf_file = generate_pdf(results, forecast_df, chart_path)
+
+    with open(pdf_file, "rb") as f:
+        st.download_button(
+            "Download PDF",
+            f,
+            file_name="Kenya_Sugar_Forecast_Report.pdf",
+            mime="application/pdf"
+        )
