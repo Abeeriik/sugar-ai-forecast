@@ -11,7 +11,7 @@ from xgboost import XGBRegressor
 # APP
 # =========================================================
 
-st.title("Kenya Sugar AI Forecasting System v4")
+st.title("Kenya Sugar AI Forecasting System v5 (Improved Dynamics)")
 
 # =========================================================
 # LOAD DATA FROM GITHUB
@@ -26,10 +26,9 @@ def load_data():
     df.columns = df.columns.str.strip()
 
     first_col = df.columns[0]
-
     df[first_col] = pd.to_datetime(df[first_col], errors="coerce")
-    df = df.dropna(subset=[first_col])
 
+    df = df.dropna(subset=[first_col])
     df.rename(columns={first_col: "Date"}, inplace=True)
 
     df = df.sort_values("Date").reset_index(drop=True)
@@ -39,7 +38,7 @@ def load_data():
 
 df = load_data()
 
-st.subheader("Data Preview")
+st.subheader("Dataset Preview")
 st.dataframe(df.head())
 
 # =========================================================
@@ -55,6 +54,10 @@ df["import_dependency"] = df["Sugar_Imports"] / (df["Sug_Production"] + 1)
 df["sin_month"] = np.sin(2 * np.pi * df["Month"] / 12)
 df["cos_month"] = np.cos(2 * np.pi * df["Month"] / 12)
 
+# rolling stability features (IMPORTANT FIX)
+df["sales_roll"] = df["Sug_Sales"].rolling(3).mean()
+df["prod_roll"] = df["Sug_Production"].rolling(3).mean()
+
 df = df.dropna().reset_index(drop=True)
 
 # =========================================================
@@ -65,7 +68,7 @@ train_df = df[df["Year"] <= 2024]
 test_df = df[df["Year"] == 2025]
 
 # =========================================================
-# FEATURES / TARGETS
+# FEATURES & TARGETS
 # =========================================================
 
 features = [
@@ -83,7 +86,9 @@ features = [
     "stock_pressure",
     "import_dependency",
     "sin_month",
-    "cos_month"
+    "cos_month",
+    "sales_roll",
+    "prod_roll"
 ]
 
 targets = [
@@ -100,8 +105,10 @@ targets = [
 results = {}
 forecast_results = {}
 
+st.subheader("Model Performance (2025)")
+
 # =========================================================
-# TRAIN MODELS
+# MODEL TRAINING
 # =========================================================
 
 for target in targets:
@@ -115,7 +122,7 @@ for target in targets:
     rf = RandomForestRegressor(n_estimators=300, random_state=42)
 
     xgb = XGBRegressor(
-        n_estimators=200,
+        n_estimators=250,
         learning_rate=0.05,
         max_depth=4,
         subsample=0.8,
@@ -156,7 +163,7 @@ for target in targets:
     }
 
 # =========================================================
-# RESULTS TABLE
+# PERFORMANCE TABLE
 # =========================================================
 
 st.subheader("Model Performance Table")
@@ -188,7 +195,7 @@ ax.legend()
 st.pyplot(fig)
 
 # =========================================================
-# 2026 FORECAST
+# 2026 FORECAST (FULL FIXED VERSION)
 # =========================================================
 
 st.subheader("2026 Forecast Projections")
@@ -200,12 +207,34 @@ future_df = pd.DataFrame({"Date": future_dates})
 future_df["Month"] = future_df["Date"].dt.month
 future_df["Year"] = future_df["Date"].dt.year
 
+# seasonal signal
+season = np.sin(2 * np.pi * future_df["Month"] / 12)
+
+# generate dynamic features (NOT CONSTANT anymore)
 for col in features:
-    if col not in ["Month", "Year", "sin_month", "cos_month"]:
-        future_df[col] = df[col].iloc[-1]
+
+    if col in ["Month", "Year", "sin_month", "cos_month", "sales_roll", "prod_roll"]:
+        continue
+
+    base = df[col].mean()
+    noise = df[col].std()
+
+    future_df[col] = base + (noise * 0.15 * np.random.randn(len(future_df)))
+
+# rolling feature simulation
+future_df["sales_roll"] = future_df["Sug_Sales"].rolling(3, min_periods=1).mean()
+future_df["prod_roll"] = future_df["Sugar_Made"].rolling(3, min_periods=1).mean()
+
+# seasonality injection
+for col in ["Sug_Sales", "Sugar_Made", "Molasses_Sales"]:
+    future_df[col] = future_df[col] * (1 + season * 0.1)
 
 future_df["sin_month"] = np.sin(2 * np.pi * future_df["Month"] / 12)
 future_df["cos_month"] = np.cos(2 * np.pi * future_df["Month"] / 12)
+
+# =========================================================
+# FORECAST 2026
+# =========================================================
 
 forecast_2026 = {}
 
@@ -225,10 +254,14 @@ forecast_table.insert(0, "Date", future_dates)
 st.subheader("2026 Forecast Table")
 st.dataframe(forecast_table)
 
+# =========================================================
+# 2026 PLOT
+# =========================================================
+
 fig2, ax2 = plt.subplots()
 
 for col in targets:
-    ax2.plot(forecast_table["Date"], forecast_table[col], label=col)
+    ax2.plot(forecast_table["Date"], forecast_table[col], marker="o", label=col)
 
 ax2.legend()
 st.pyplot(fig2)
