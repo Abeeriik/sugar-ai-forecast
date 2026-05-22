@@ -15,8 +15,15 @@ if uploaded_file is not None:
 
     # =========================
     # LOAD DATA
+    import os
     # =========================
-    df = pd.read_csv(uploaded_file)
+    df = pd.read_csv(DATA_PATH)
+    DATA_PATH = "Integrated_Sugar_Forecasting_Data.csv"
+
+    if not os.path.exists(DATA_PATH):
+        st.error(f"Dataset file not found: {DATA_PATH}")
+        st.stop()
+    df = pd.read_csv(DATA_PATH)
 
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.sort_values("Date")
