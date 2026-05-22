@@ -8,13 +8,13 @@ from sklearn.linear_model import Ridge
 from xgboost import XGBRegressor
 
 # =========================================================
-# APP TITLE
+# APP
 # =========================================================
 
-st.title("Kenya Sugar AI Forecasting System (v4)")
+st.title("Kenya Sugar AI Forecasting System v4")
 
 # =========================================================
-# LOAD DATA FROM GITHUB (FIXED)
+# LOAD DATA FROM GITHUB
 # =========================================================
 
 @st.cache_data
@@ -23,11 +23,14 @@ def load_data():
     url = "https://raw.githubusercontent.com/Abeeriik/sugar-ai-forecast/main/Integrated_Sugar_Forecasting_Data.csv"
 
     df = pd.read_csv(url)
-
     df.columns = df.columns.str.strip()
 
-    df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
-    df.rename(columns={df.columns[0]: "Date"}, inplace=True)
+    first_col = df.columns[0]
+
+    df[first_col] = pd.to_datetime(df[first_col], errors="coerce")
+    df = df.dropna(subset=[first_col])
+
+    df.rename(columns={first_col: "Date"}, inplace=True)
 
     df = df.sort_values("Date").reset_index(drop=True)
 
@@ -36,7 +39,7 @@ def load_data():
 
 df = load_data()
 
-st.subheader("Dataset Preview")
+st.subheader("Data Preview")
 st.dataframe(df.head())
 
 # =========================================================
@@ -62,7 +65,7 @@ train_df = df[df["Year"] <= 2024]
 test_df = df[df["Year"] == 2025]
 
 # =========================================================
-# FEATURES & TARGETS
+# FEATURES / TARGETS
 # =========================================================
 
 features = [
@@ -96,8 +99,6 @@ targets = [
 
 results = {}
 forecast_results = {}
-
-st.subheader("Model Performance (2025)")
 
 # =========================================================
 # TRAIN MODELS
@@ -155,7 +156,7 @@ for target in targets:
     }
 
 # =========================================================
-# TABLE
+# RESULTS TABLE
 # =========================================================
 
 st.subheader("Model Performance Table")
@@ -173,15 +174,14 @@ data = forecast_results[selected]
 
 fig, ax = plt.subplots()
 
-ax.plot(data["actual"], label="Actual", marker="o")
-ax.plot(data["predicted"], label="Forecast", marker="o")
+ax.plot(data["actual"], label="Actual")
+ax.plot(data["predicted"], label="Forecast")
 
 ax.fill_between(
     range(len(data["actual"])),
     data["lower"],
     data["upper"],
-    alpha=0.2,
-    label="Confidence Interval"
+    alpha=0.2
 )
 
 ax.legend()
